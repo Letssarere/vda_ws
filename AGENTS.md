@@ -80,7 +80,7 @@ Execute the launch file to start the RealSense camera and the Depth Estimation n
 ros2 launch vda_streaming streaming.launch.py
 ```
 
-## 🧩 Node Details (`vda_streaming/node.py`)
+## 🧩 Node Details (`vda_streaming/vda_streaming_node.py`)
 
 - **Node Name:** `vda_streaming_node`
 

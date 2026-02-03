@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
+import cv2
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
@@ -56,6 +57,11 @@ class StreamingDepthNode(Node):
         self._pub = self.create_publisher(
             Image,
             self._output_topic,
+            qos_profile,
+        )
+        self._vis_pub = self.create_publisher(
+            Image,
+            '/vda/depth_vis',
             qos_profile,
         )
         self._sub = self.create_subscription(
@@ -285,6 +291,17 @@ class StreamingDepthNode(Node):
         depth_msg.header = msg.header
         self._pub.publish(depth_msg)
 
+        depth_vis = self._depth_to_colormap(depth)
+        if depth_vis is None:
+            return
+        try:
+            vis_msg = self._bridge.cv2_to_imgmsg(depth_vis, encoding='bgr8')
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f'Failed to encode depth vis: {exc}')
+            return
+        vis_msg.header = msg.header
+        self._vis_pub.publish(vis_msg)
+
     def _compute_crop(
         self, frame_height: int, frame_width: int
     ) -> tuple[int, int, int, int] | None:
@@ -296,6 +313,17 @@ class StreamingDepthNode(Node):
         if x2 <= x1 or y2 <= y1:
             return None
         return x1, y1, x2, y2
+
+    def _depth_to_colormap(self, depth: np.ndarray) -> np.ndarray | None:
+        depth_min = float(np.nanmin(depth))
+        depth_max = float(np.nanmax(depth))
+        if not np.isfinite(depth_min) or not np.isfinite(depth_max):
+            return None
+        if depth_max <= depth_min:
+            return np.zeros((*depth.shape, 3), dtype=np.uint8)
+        depth_norm = (depth - depth_min) / (depth_max - depth_min)
+        depth_u8 = np.clip(depth_norm * 255.0, 0.0, 255.0).astype(np.uint8)
+        return cv2.applyColorMap(depth_u8, cv2.COLORMAP_INFERNO)
 
     def shutdown(self) -> None:
         """Stop the worker thread gracefully."""

@@ -22,7 +22,7 @@ vda_ws/
         │   └── metric_video_depth_anything_vits.pth  # (Ignored by Git)
         └── vda_streaming/      # Python source code
             ├── __init__.py
-            ├── node.py         # Main ROS2 Node (StreamingDepthNode)
+            ├── vda_streaming_node.py         # Main ROS2 Node (StreamingDepthNode)
             └── libs/           # External libraries (Video-Depth-Anything Source)
                 ├── video_depth_anything/  # Core model definitions (Copied from upstream)
                 └── utils/                 # Utility functions (Copied from upstream)

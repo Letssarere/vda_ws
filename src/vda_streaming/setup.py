@@ -9,6 +9,8 @@ package_data_files = []
 for path in glob(os.path.join(package_name, 'libs', '**', '*.py'), recursive=True):
     package_data_files.append(os.path.relpath(path, package_name))
 
+checkpoint_files = glob(os.path.join('checkpoints', '*.pth'))
+
 setup(
     name=package_name,
     version='0.0.0',
@@ -19,6 +21,10 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/streaming.launch.py']),
+        (
+            'share/' + package_name + '/checkpoints',
+            checkpoint_files,
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

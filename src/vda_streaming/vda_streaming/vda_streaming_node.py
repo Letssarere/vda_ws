@@ -45,6 +45,8 @@ class StreamingDepthNode(Node):
         self._model = self._load_model()
         self._frame_height = None
         self._frame_width = None
+        self._crop_box = (80, 60, 560, 420)
+        self._crop_last = None
 
         qos_profile = QoSProfile(
             depth=1,
@@ -231,7 +233,23 @@ class StreamingDepthNode(Node):
             self.get_logger().error(f'Failed to decode image: {exc}')
             return
 
+        input_height, input_width = frame.shape[:2]
+        crop = self._compute_crop(input_height, input_width)
+        if crop is None:
+            self.get_logger().error(
+                'Invalid crop region; check crop coordinates.'
+            )
+            return
+        x1, y1, x2, y2 = crop
+        frame = frame[y1:y2, x1:x2]
         frame_height, frame_width = frame.shape[:2]
+
+        if self._crop_last != crop:
+            self.get_logger().info(
+                f'Using crop box x1={x1}, y1={y1}, x2={x2}, y2={y2}.'
+            )
+            self._crop_last = crop
+
         if self._frame_height is None:
             self._frame_height = frame_height
             self._frame_width = frame_width
@@ -240,7 +258,7 @@ class StreamingDepthNode(Node):
             or frame_width != self._frame_width
         ):
             self.get_logger().warning(
-                'Frame size changed; resetting streaming cache.'
+                'Crop size changed; resetting streaming cache.'
             )
             self._frame_height = frame_height
             self._frame_width = frame_width
@@ -266,6 +284,18 @@ class StreamingDepthNode(Node):
 
         depth_msg.header = msg.header
         self._pub.publish(depth_msg)
+
+    def _compute_crop(
+        self, frame_height: int, frame_width: int
+    ) -> tuple[int, int, int, int] | None:
+        x1, y1, x2, y2 = self._crop_box
+        x1 = max(0, min(x1, frame_width - 1))
+        y1 = max(0, min(y1, frame_height - 1))
+        x2 = max(x1 + 1, min(x2, frame_width))
+        y2 = max(y1 + 1, min(y2, frame_height))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return x1, y1, x2, y2
 
     def shutdown(self) -> None:
         """Stop the worker thread gracefully."""

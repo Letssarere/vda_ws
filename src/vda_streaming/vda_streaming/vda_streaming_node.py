@@ -109,8 +109,22 @@ class StreamingDepthNode(Node):
         self._checkpoint_path = checkpoint_param.string_value
 
     def _default_checkpoint_path(self) -> Path:
-        package_dir = Path(__file__).resolve().parent
-        checkpoints_dir = package_dir.parent / 'checkpoints'
+        checkpoints_dir = None
+        try:
+            from ament_index_python.packages import (  # noqa: WPS433
+                get_package_share_directory,
+            )
+
+            share_dir = Path(
+                get_package_share_directory('vda_streaming')
+            )
+            checkpoints_dir = share_dir / 'checkpoints'
+        except Exception:  # noqa: BLE001
+            checkpoints_dir = None
+
+        if checkpoints_dir is None:
+            package_dir = Path(__file__).resolve().parent
+            checkpoints_dir = package_dir.parent / 'checkpoints'
         checkpoint_name = (
             'metric_video_depth_anything'
             if self._metric

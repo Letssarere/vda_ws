@@ -1,11 +1,19 @@
+import os
+from glob import glob
+
 from setuptools import setup
 
 package_name = 'vda_streaming'
+
+package_data_files = []
+for path in glob(os.path.join(package_name, 'libs', '**', '*.py'), recursive=True):
+    package_data_files.append(os.path.relpath(path, package_name))
 
 setup(
     name=package_name,
     version='0.0.0',
     packages=[package_name],
+    package_data={package_name: package_data_files},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),

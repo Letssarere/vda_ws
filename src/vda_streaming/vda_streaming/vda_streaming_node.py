@@ -48,6 +48,12 @@ class StreamingDepthNode(Node):
         self._frame_width = None
         self._crop_box = (80, 60, 560, 420)
         self._crop_last = None
+        self._warp_points = {
+            'top_left': (120, 80),
+            'top_right': (520, 80),
+            'bottom_left': (120, 400),
+            'bottom_right': (520, 400),
+        }
 
         qos_profile = QoSProfile(
             depth=1,
@@ -62,6 +68,16 @@ class StreamingDepthNode(Node):
         self._vis_pub = self.create_publisher(
             Image,
             '/vda/depth_vis',
+            qos_profile,
+        )
+        self._warp_pub = self.create_publisher(
+            Image,
+            '/vda/depth_warp',
+            qos_profile,
+        )
+        self._warp_bin_pub = self.create_publisher(
+            Image,
+            '/vda/depth_warp_bin',
             qos_profile,
         )
         self._sub = self.create_subscription(
@@ -302,6 +318,35 @@ class StreamingDepthNode(Node):
         vis_msg.header = msg.header
         self._vis_pub.publish(vis_msg)
 
+        restored_depth = self._restore_depth(
+            depth, input_height, input_width, crop
+        )
+        warp_depth = self._warp_depth(restored_depth)
+        if warp_depth is None:
+            return
+        try:
+            warp_msg = self._bridge.cv2_to_imgmsg(
+                warp_depth, encoding='32FC1'
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f'Failed to encode depth warp: {exc}')
+            return
+        warp_msg.header = msg.header
+        self._warp_pub.publish(warp_msg)
+
+        warp_bin = self._adaptive_binarize(warp_depth)
+        if warp_bin is None:
+            return
+        try:
+            bin_msg = self._bridge.cv2_to_imgmsg(
+                warp_bin, encoding='mono8'
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f'Failed to encode depth warp bin: {exc}')
+            return
+        bin_msg.header = msg.header
+        self._warp_bin_pub.publish(bin_msg)
+
     def _compute_crop(
         self, frame_height: int, frame_width: int
     ) -> tuple[int, int, int, int] | None:
@@ -324,6 +369,77 @@ class StreamingDepthNode(Node):
         depth_norm = (depth - depth_min) / (depth_max - depth_min)
         depth_u8 = np.clip(depth_norm * 255.0, 0.0, 255.0).astype(np.uint8)
         return cv2.applyColorMap(depth_u8, cv2.COLORMAP_INFERNO)
+
+    def _restore_depth(
+        self,
+        depth: np.ndarray,
+        input_height: int,
+        input_width: int,
+        crop: tuple[int, int, int, int],
+    ) -> np.ndarray:
+        restored = np.zeros((input_height, input_width), dtype=np.float32)
+        x1, y1, x2, y2 = crop
+        restored[y1:y2, x1:x2] = depth
+        return restored
+
+    def _warp_depth(self, depth: np.ndarray) -> np.ndarray | None:
+        points = self._warp_points
+        src = np.array(
+            [
+                points['top_left'],
+                points['top_right'],
+                points['bottom_right'],
+                points['bottom_left'],
+            ],
+            dtype=np.float32,
+        )
+        width_top = np.linalg.norm(src[1] - src[0])
+        width_bottom = np.linalg.norm(src[2] - src[3])
+        height_left = np.linalg.norm(src[3] - src[0])
+        height_right = np.linalg.norm(src[2] - src[1])
+        width = max(int(round(width_top)), int(round(width_bottom)))
+        height = max(int(round(height_left)), int(round(height_right)))
+        if width <= 1 or height <= 1:
+            self.get_logger().error('Warp size is invalid.')
+            return None
+        dst = np.array(
+            [
+                [0.0, 0.0],
+                [width - 1.0, 0.0],
+                [width - 1.0, height - 1.0],
+                [0.0, height - 1.0],
+            ],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(src, dst)
+        return cv2.warpPerspective(
+            depth,
+            matrix,
+            (width, height),
+            flags=cv2.INTER_LINEAR,
+            borderValue=0,
+        )
+
+    def _adaptive_binarize(self, depth: np.ndarray) -> np.ndarray | None:
+        valid_mask = depth > 0.0
+        if not np.any(valid_mask):
+            return np.zeros(depth.shape, dtype=np.uint8)
+        valid_values = depth[valid_mask]
+        depth_min = float(valid_values.min())
+        depth_max = float(valid_values.max())
+        if depth_max <= depth_min:
+            return np.zeros(depth.shape, dtype=np.uint8)
+        depth_norm = (depth - depth_min) / (depth_max - depth_min)
+        depth_u8 = np.clip(depth_norm * 255.0, 0.0, 255.0).astype(np.uint8)
+        depth_u8[~valid_mask] = 0
+        return cv2.adaptiveThreshold(
+            depth_u8,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            11,
+            2,
+        )
 
     def shutdown(self) -> None:
         """Stop the worker thread gracefully."""
